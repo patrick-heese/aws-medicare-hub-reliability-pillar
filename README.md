@@ -233,5 +233,6 @@ Cloud Administrator | Aspiring Cloud Engineer/Architect
 
 ## Acknowledgments
 This project was inspired by a course from [techwithlucy](https://github.com/techwithlucy).  
+The Medicare Hub static website files were taken directly from the course author's original implementation.  
 The architecture diagram included here is my own version, adapted from the original course diagram.  
 I designed and developed all Infrastructure-as-Code (CloudFormation) and project documentation.  
