@@ -1,0 +1,281 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: BEFORE state - single public EC2 + single-AZ RDS (no ALB/ASG/EFS/Route53). Public EC2 for easy browser access.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: MedicareHub-Baseline
+
+  KeyPairName:
+    Type: String
+    Default: ""   # optional
+
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+  VpcCidr:
+    Type: String
+    Default: 10.1.0.0/16
+
+  PublicSubnetCidrA:
+    Type: String
+    Default: 10.1.0.0/24
+
+  PrivateSubnetCidrA:
+    Type: String
+    Default: 10.1.1.0/24
+
+  PrivateSubnetCidrB:
+    Type: String
+    Default: 10.1.2.0/24
+
+  DbUsername:
+    Type: String
+    Default: admin
+
+  DbPassword:
+    Type: String
+    NoEcho: true
+    Default: password
+
+  DbName:
+    Type: String
+    Default: medicaldb
+
+  WebsiteContentBucketName:
+    Type: String
+
+Conditions:
+  HasKeyPair:
+    Fn::Not:
+      - Fn::Equals:
+          - !Ref KeyPairName
+          - ""
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc'
+
+  Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-igw'
+
+  VpcIgwAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref Igw
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref PublicSubnetCidrA
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: public-a
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnetCidrA
+      Tags:
+        - Key: Name
+          Value: private-a
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnetCidrB
+      Tags:
+        - Key: Name
+          Value: private-b
+
+  PublicRt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: public-rt
+
+  PublicRtIgwRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRt
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Igw
+
+  AssocPublicA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRt
+
+  # EC2 SG (HTTP/SSH world-open for demo). Tighten 22 or remove if using SSM only.
+  AppSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: baseline app sg
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: app-sg
+
+  # RDS SG allows MySQL from the EC2 SG
+  DbSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: baseline db sg (3306 from AppSG)
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref AppSG
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: db-sg
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: read-website-content-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${WebsiteContentBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !Sub 'arn:aws:s3:::${WebsiteContentBucketName}'
+      Tags:
+        - Key: Name
+          Value: medicarehub-baseline-ec2-role
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !If [ HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue' ]
+      SubnetId: !Ref PublicSubnetA
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds:
+        - !Ref AppSG
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -euxo pipefail
+              yum update -y
+              yum install -y httpd git awscli amazon-ssm-agent
+              systemctl enable amazon-ssm-agent
+              systemctl start amazon-ssm-agent
+              systemctl enable httpd
+              systemctl start httpd
+
+              mkdir -p /tmp/MedicalWebsite
+              aws s3 cp s3://${WebsiteContentBucketName}/ /tmp/MedicalWebsite/ --recursive || true
+              cp -r /tmp/MedicalWebsite/* /var/www/html/ || true
+              systemctl restart httpd
+
+              # DB env vars (from template parameters)
+              cat >/etc/profile.d/medicare-db.sh <<'EOF'
+              export DB_HOST=${DbEndpoint}
+              export DB_PORT=3306
+              export DB_USER=${DbUsername}
+              export DB_PASSWORD='${DbPassword}'
+              export DB_NAME=${DbName}
+              EOF
+            - { DbEndpoint: !GetAtt DBInstance.Endpoint.Address }
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: private subnets (baseline)
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: 20
+      Engine: mysql
+      EngineVersion: '8.0'
+      DBInstanceClass: db.t3.micro
+      MasterUsername: !Ref DbUsername
+      MasterUserPassword: !Ref DbPassword
+      DBName: !Ref DbName
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref DbSG
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      MultiAZ: false
+
+Outputs:
+  PublicIP:
+    Value: !GetAtt Instance.PublicIp
+
+  PublicDNS:
+    Value: !GetAtt Instance.PublicDnsName
+  
+  PublicIPURL:
+    Value: !Sub 'http://${Instance.PublicIp}'
+    
+  PublicDNSURL:
+    Value: !Sub 'http://${Instance.PublicDnsName}'

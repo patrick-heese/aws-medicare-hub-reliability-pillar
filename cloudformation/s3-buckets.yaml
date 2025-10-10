@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 buckets for CFN artifacts, website content, and failover static site
+
+Parameters:
+  ArtifactsBucketName:
+    Type: String
+    Default: ""
+    Description: Optional. If empty, a name will be generated as medicarehub-cfn-artifacts-<account-id>.
+
+  WebsiteContentBucketName:
+    Type: String
+    Description: Name for the bucket that stores the site files.
+
+  FailoverBucketName:
+    Type: String
+    Description: Name for the static website failover bucket (serves backup page- name must match domain name to use for apex failover).
+    
+Conditions:
+  HasArtifactsName:
+    Fn::Not:
+      - Fn::Equals:
+        - !Ref ArtifactsBucketName
+        - ""
+
+Resources:
+  CfnArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - HasArtifactsName
+        - !Ref ArtifactsBucketName
+        - !Sub 'medicarehub-cfn-artifacts-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: cfn-artifacts
+
+  WebsiteContentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref WebsiteContentBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: website-content
+
+  FailoverBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref FailoverBucketName
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      # For website hosting, keep public access block permissive; policy controls exposure
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: Name
+          Value: failover-site
+
+  # Public read for the failover website
+  FailoverPublicReadPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FailoverBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${FailoverBucketName}/*'
+
+Outputs:
+  ArtifactsBucketName:
+    Value: !Ref CfnArtifactsBucket
+
+  ArtifactsBucketUrl:
+    Value: !Sub 's3://${CfnArtifactsBucket}'
+
+  WebsiteContentBucketName:
+    Value: !Ref WebsiteContentBucket
+
+  WebsiteContentBucketUrl:
+    Value: !Sub 's3://${WebsiteContentBucket}'
+
+  FailoverBucketName:
+    Value: !Ref FailoverBucket
+
+  FailoverWebsiteDomain:
+    Value: !Sub '${FailoverBucketName}.s3-website-${AWS::Region}.amazonaws.com'
+
+  FailoverWebsiteURL:
+    Value: !Sub 'http://${FailoverBucketName}.s3-website-${AWS::Region}.amazonaws.com'

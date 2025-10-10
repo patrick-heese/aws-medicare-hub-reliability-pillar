@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Minimal VPC with 2 public and 2 private subnets, 1 NAT, routes, and SGs (exports)
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: MedicareHub
+
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicSubnet1Cidr:
+    Type: String
+    Default: 10.0.1.0/24
+
+  PublicSubnet2Cidr:
+    Type: String
+    Default: 10.0.3.0/24
+
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: 10.0.2.0/24
+
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 10.0.4.0/24
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc'
+
+  Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-igw'
+
+  VpcIgwAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref Igw
+      VpcId: !Ref Vpc
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Ref PublicSubnet1Cidr
+      Tags:
+        - Key: Name
+          Value: public-a
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Ref PublicSubnet2Cidr
+      Tags:
+        - Key: Name
+          Value: public-b
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      Tags:
+        - Key: Name
+          Value: private-a
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      Tags:
+        - Key: Name
+          Value: private-b
+
+  PublicRt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: public-rt
+
+  PublicRtIgwRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRt
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Igw
+
+  PublicAssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRt
+
+  PublicAssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRt
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGw:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-nat'
+
+  PrivateRt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: private-rt
+
+  PrivateRtNatRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRt
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGw
+
+  PrivateAssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRt
+
+  PrivateAssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRt
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: medical-sg (HTTP 80, SSH 22)
+      GroupName: !Sub '${ProjectName}-medical-sg'
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: medical-sg
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: alb-sg (HTTP 80 from internet)
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: alb-sg
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+
+  PublicSubnetAId:
+    Value: !Ref PublicSubnetA
+
+  PublicSubnetBId:
+    Value: !Ref PublicSubnetB
+
+  PrivateSubnetAId:
+    Value: !Ref PrivateSubnetA
+
+  PrivateSubnetBId:
+    Value: !Ref PrivateSubnetB
+
+  AppSecurityGroupId:
+    Value: !Ref AppSecurityGroup
+
+  AlbSecurityGroupId:
+    Value: !Ref AlbSecurityGroup

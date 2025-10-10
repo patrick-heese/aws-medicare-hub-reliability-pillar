@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Route 53 public hosted zone with apex failover (ALB -> S3 website endpoint).
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Root domain (e.g., weathertracker.online)
+
+  AlbDNSName:
+    Type: String
+    Description: DNS name of the ALB (from Phase 4 output)
+
+  AlbHostedZoneId:
+    Type: String
+    Description: Hosted zone ID of the ALB (from Phase 4 output)
+
+  # Kept for compatibility with parent; the bucket must be named exactly DomainName,
+  # but the alias target is the regional S3 *website endpoint* (no bucket prefix).
+  FailoverBucketName:
+    Type: String
+    Description: Name of the S3 static website bucket (should equal DomainName)
+
+  # us-east-1 S3 Website Hosted Zone ID (override if you deploy in another region)
+  S3WebsiteHostedZoneId:
+    Type: String
+    Default: Z3AQBSTGFYJSTF
+
+Resources:
+  PublicHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref DomainName
+
+  # PRIMARY apex record -> ALB (Route 53 uses ALB target health)
+  ApexPrimaryALB:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZone
+      Name: !Sub '${DomainName}.'
+      Type: A
+      AliasTarget:
+        DNSName: !Ref AlbDNSName
+        HostedZoneId: !Ref AlbHostedZoneId
+        EvaluateTargetHealth: true
+      Failover: PRIMARY
+      SetIdentifier: failover-primary-record
+
+  # SECONDARY apex record -> S3 Website (alias to regional website endpoint ROOT)
+  ApexSecondaryS3:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZone
+      Name: !Sub '${DomainName}.'
+      Type: A
+      AliasTarget:
+        DNSName: !Sub 's3-website-${AWS::Region}.amazonaws.com'
+        HostedZoneId: !Ref S3WebsiteHostedZoneId
+        EvaluateTargetHealth: false
+      Failover: SECONDARY
+      SetIdentifier: failover-secondary-record
+
+Outputs:
+  HostedZoneId:
+    Value: !Ref PublicHostedZone
+    Description: Route 53 hosted zone ID
+
+  NameServers:
+    Value: !Join [ ",", !GetAtt PublicHostedZone.NameServers ]
+    Description: NS records to delegate at your registrar
+
+  ApexPrimaryTarget:
+    Value: !Ref AlbDNSName
+    Description: Apex PRIMARY alias target (ALB)
+
+  ApexSecondaryTarget:
+    Value: !Sub 's3-website-${AWS::Region}.amazonaws.com'
+    Description: Apex SECONDARY alias target (regional S3 website endpoint)

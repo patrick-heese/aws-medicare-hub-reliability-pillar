@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EFS filesystem + mount targets, allow NFS (2049) from medical-sg
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: MedicareHub
+
+  VpcId:
+    Type: String
+
+  PrivateSubnetAId:
+    Type: String
+
+  PrivateSubnetBId:
+    Type: String
+
+  AppSecurityGroupId:
+    Type: String
+
+Resources:
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: efs-sg allowing NFS from app SG
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref AppSecurityGroupId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: efs-sg
+
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: false
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-efs'
+
+  MountTargetA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Ref PrivateSubnetAId
+      SecurityGroups:
+        - !Ref EfsSecurityGroup
+
+  MountTargetB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Ref PrivateSubnetBId
+      SecurityGroups:
+        - !Ref EfsSecurityGroup
+
+Outputs:
+  FileSystemId:
+    Value: !Ref FileSystem
+
+  EfsSecurityGroupId:
+    Value: !Ref EfsSecurityGroup

@@ -1,0 +1,241 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Launch Template (AL2), Target Group, ALB, ASG across 2 AZs
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: MedicareHub
+
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+  VpcId:
+    Type: String
+
+  PublicSubnetAId:
+    Type: String
+
+  PublicSubnetBId:
+    Type: String
+
+  PrivateSubnetAId:
+    Type: String
+
+  PrivateSubnetBId:
+    Type: String
+
+  AppSecurityGroupId:
+    Type: String
+
+  AlbSecurityGroupId:
+    Type: String
+
+  KeyPairName:
+    Type: String
+    Default: ""
+
+  WebsiteContentBucketName:
+    Type: String
+
+  EfsFileSystemId:
+    Type: String
+
+  RdsEndpointAddress:
+    Type: String
+
+  DesiredCapacity:
+    Type: Number
+    Default: 2
+
+  MinCapacity:
+    Type: Number
+    Default: 1
+
+  MaxCapacity:
+    Type: Number
+    Default: 3
+
+  DbUsername:
+    Type: String
+    Default: admin
+
+  DbPassword:
+    Type: String
+    NoEcho: true
+
+  DbName:
+    Type: String
+    Default: medicaldb
+
+Conditions:
+  HasKeyPair:
+    Fn::Not:
+      - Fn::Equals:
+          - !Ref KeyPairName
+          - ""  
+
+Resources:
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: read-website-content-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${WebsiteContentBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !Sub 'arn:aws:s3:::${WebsiteContentBucketName}'
+      Tags:
+        - Key: Name
+          Value: medicarehub-ec2-role
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+      InstanceProfileName: !Sub '${ProjectName}-ec2-profile'
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: medical-app-template
+      LaunchTemplateData:
+        ImageId: !Ref LatestAmiId
+        InstanceType: t2.micro
+        KeyName: !If [ HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue' ]
+        IamInstanceProfile:
+          Arn: !GetAtt InstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref AppSecurityGroupId
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${ProjectName}-app'
+        UserData:
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/bash
+              set -euxo pipefail
+
+              # System + agents
+              yum update -y
+              yum install -y httpd git awscli amazon-ssm-agent amazon-efs-utils
+              systemctl enable amazon-ssm-agent
+              systemctl start amazon-ssm-agent
+              systemctl enable httpd
+              systemctl start httpd
+
+              # --- EFS (mount to web root and persist) ---
+              mkdir -p /var/www/html
+              mount -t efs ${EfsFileSystemId}:/ /var/www/html || true
+              grep -q "${EfsFileSystemId}:/ /var/www/html efs defaults,_netdev 0 0" /etc/fstab || \
+                echo "${EfsFileSystemId}:/ /var/www/html efs defaults,_netdev 0 0" >> /etc/fstab
+
+              # --- Website content ---
+              mkdir -p /tmp/MedicareHubWebsite
+              aws s3 cp s3://${WebsiteContentBucketName}/ /tmp/MedicareHubWebsite/ --recursive || true
+              cp -r /tmp/MedicareHubWebsite/* /var/www/html/ || true
+              chown -R apache:apache /var/www/html || true
+              systemctl restart httpd
+
+              # --- DB env vars (for future app use) ---
+              cat >/etc/profile.d/medicare-db.sh <<'EOF'
+              export DB_HOST=${RdsEndpointAddress}
+              export DB_PORT=3306
+              export DB_USER=${DbUsername}
+              export DB_PASSWORD='${DbPassword}'
+              export DB_NAME=${DbName}
+              EOF
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: medical-app-tg
+      TargetType: instance
+      Protocol: HTTP
+      Port: 80
+      HealthCheckEnabled: true
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: medical-app-alb
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref AlbSecurityGroupId
+      Subnets:
+        - !Ref PublicSubnetAId
+        - !Ref PublicSubnetBId
+
+  ListenerHttp:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnetAId
+        - !Ref PrivateSubnetBId
+      MinSize: !Ref MinCapacity
+      MaxSize: !Ref MaxCapacity
+      DesiredCapacity: !Ref DesiredCapacity
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 90
+      TargetGroupARNs:
+        - !Ref TargetGroup
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-asg'
+          PropagateAtLaunch: true
+
+Outputs:
+  AlbDNSName:
+    Value: !GetAtt LoadBalancer.DNSName
+
+  AlbHostedZoneId:
+    Value: !GetAtt LoadBalancer.CanonicalHostedZoneID
+
+  TargetGroupArn:
+    Value: !Ref TargetGroup
+
+  LaunchTemplateId:
+    Value: !Ref LaunchTemplate
+
+  AutoScalingGroupName:
+    Value: !Ref AutoScalingGroup

@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS MySQL Multi-AZ (instance-based) in private subnets
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: MedicareHub
+
+  VpcId:
+    Type: String
+
+  PrivateSubnetAId:
+    Type: String
+
+  PrivateSubnetBId:
+    Type: String
+
+  AppSecurityGroupId:
+    Type: String
+
+  DbUsername:
+    Type: String
+    Default: admin
+
+  DbPassword:
+    Type: String
+    NoEcho: true
+
+  DbName:
+    Type: String
+    Default: medicaldb
+
+Resources:
+  RdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: rds-sg allowing 3306 from app SG
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref AppSecurityGroupId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: rds-sg
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for RDS
+      SubnetIds:
+        - !Ref PrivateSubnetAId
+        - !Ref PrivateSubnetBId
+      DBSubnetGroupName: !Sub '${ProjectName}-dbsubnet'
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: medical-db
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 25
+      Engine: mysql
+      EngineVersion: '8.0'
+      DBInstanceClass: db.t3.micro
+      MultiAZ: true
+      MasterUsername: !Ref DbUsername
+      MasterUserPassword: !Ref DbPassword
+      DBName: !Ref DbName
+      StorageType: gp2
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref RdsSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DeletionProtection: false
+
+Outputs:
+  DBEndpointAddress:
+    Value: !GetAtt DBInstance.Endpoint.Address
