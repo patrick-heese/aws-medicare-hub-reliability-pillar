@@ -1,46 +1,42 @@
 [
   {
     "ParameterKey": "Phase1TemplateUrl",
-    "ParameterValue": "https://<BUCKET>.s3.<REGION>.amazonaws.com/cfn/phase1-networking.yaml"
+    "ParameterValue": "https://testingprojects-148524.s3.us-east-1.amazonaws.com/medicarehub/phase1-networking.yaml"
   },
   {
     "ParameterKey": "Phase2TemplateUrl",
-    "ParameterValue": "https://<BUCKET>.s3.<REGION>.amazonaws.com/cfn/phase2-efs.yaml"
+    "ParameterValue": "https://testingprojects-148524.s3.us-east-1.amazonaws.com/medicarehub/phase2-efs.yaml"
   },
   {
     "ParameterKey": "Phase3TemplateUrl",
-    "ParameterValue": "https://<BUCKET>.s3.<REGION>.amazonaws.com/cfn/phase3-rds.yaml"
+    "ParameterValue": "https://testingprojects-148524.s3.us-east-1.amazonaws.com/medicarehub/phase3-rds.yaml"
   },
   {
     "ParameterKey": "Phase4TemplateUrl",
-    "ParameterValue": "https://<BUCKET>.s3.<REGION>.amazonaws.com/cfn/phase4-compute.yaml"
+    "ParameterValue": "https://testingprojects-148524.s3.us-east-1.amazonaws.com/medicarehub/phase4-compute.yaml"
   },
   {
     "ParameterKey": "Phase5TemplateUrl",
-    "ParameterValue": "https://<BUCKET>.s3.<REGION>.amazonaws.com/cfn/phase5-backup-s3.yaml"
+    "ParameterValue": "https://testingprojects-148524.s3.us-east-1.amazonaws.com/medicarehub/phase5-dns-failover.yaml"
   },
   {
     "ParameterKey": "KeyPairName",
-    "ParameterValue": ""
+    "ParameterValue": "medicarehub-key-pair"
   },
   {
     "ParameterKey": "DbUsername",
     "ParameterValue": "admin"
   },
   {
-    "ParameterKey": "DbPassword",
-    "ParameterValue": "password"
+    "ParameterKey": "DbPasswordParameterName",
+    "ParameterValue": "/medicarehub/db/master_password"
   },
   {
     "ParameterKey": "WebsiteContentBucketName",
-    "ParameterValue": "<YOUR_WEBSITE_BUCKET_NAME>"
-  },
-  {
-    "ParameterKey": "FailoverBucketName",
-    "ParameterValue": "<YOUR_FAILOVER_BUCKET_NAME>"
+    "ParameterValue": "medicarehubsite56237489"
   },
   {
     "ParameterKey": "DomainName",
-    "ParameterValue": "<YOUR_DOMAIN_NAME>"
+    "ParameterValue": "weathertracker.online"
   }
 ]

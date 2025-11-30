@@ -34,10 +34,10 @@ Parameters:
     Type: String
     Default: admin
 
-  DbPassword:
+  DbPasswordParameterName:
     Type: String
-    NoEcho: true
-    Default: password
+    Default: /medicarehub-unreliable/db/master_password
+    Description: Name of SSM SecureString parameter that stores the RDS master password
 
   DbName:
     Type: String
@@ -118,6 +118,7 @@ Resources:
 
   PublicRtIgwRoute:
     Type: AWS::EC2::Route
+    DependsOn: VpcIgwAttach
     Properties:
       RouteTableId: !Ref PublicRt
       DestinationCidrBlock: 0.0.0.0/0
@@ -189,12 +190,12 @@ Resources:
               - Effect: Allow
                 Action:
                   - s3:GetObject
-                Resource: !Sub 'arn:aws:s3:::${WebsiteContentBucketName}/*'
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${WebsiteContentBucketName}/*'
               - Effect: Allow
                 Action:
                   - s3:ListBucket
                   - s3:GetBucketLocation
-                Resource: !Sub 'arn:aws:s3:::${WebsiteContentBucketName}'
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${WebsiteContentBucketName}'
       Tags:
         - Key: Name
           Value: medicarehub-baseline-ec2-role
@@ -209,7 +210,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !Ref LatestAmiId
-      InstanceType: t2.micro
+      InstanceType: t3.micro
       KeyName: !If [ HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue' ]
       SubnetId: !Ref PublicSubnetA
       IamInstanceProfile: !Ref InstanceProfile
@@ -238,7 +239,7 @@ Resources:
               export DB_HOST=${DbEndpoint}
               export DB_PORT=3306
               export DB_USER=${DbUsername}
-              export DB_PASSWORD='${DbPassword}'
+              export DB_PASSWORD='{{resolve:ssm-secure:${DbPasswordParameterName}:1}}'
               export DB_NAME=${DbName}
               EOF
             - { DbEndpoint: !GetAtt DBInstance.Endpoint.Address }
@@ -253,13 +254,16 @@ Resources:
 
   DBInstance:
     Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       AllocatedStorage: 20
       Engine: mysql
-      EngineVersion: '8.0'
+      EngineVersion: 8.0.43
       DBInstanceClass: db.t3.micro
       MasterUsername: !Ref DbUsername
-      MasterUserPassword: !Ref DbPassword
+      MasterUserPassword: !Sub "{{resolve:ssm-secure:${DbPasswordParameterName}:1}}"
+      BackupRetentionPeriod: 7
       DBName: !Ref DbName
       PubliclyAccessible: false
       VPCSecurityGroups:

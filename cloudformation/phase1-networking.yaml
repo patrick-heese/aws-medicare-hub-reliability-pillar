@@ -102,6 +102,7 @@ Resources:
 
   PublicRtIgwRoute:
     Type: AWS::EC2::Route
+    DependsOn: VpcIgwAttach
     Properties:
       RouteTableId: !Ref PublicRt
       DestinationCidrBlock: 0.0.0.0/0
@@ -163,17 +164,13 @@ Resources:
   AppSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: medical-sg (HTTP 80, SSH 22)
+      GroupDescription: medical-sg (HTTP 80)
       GroupName: !Sub '${ProjectName}-medical-sg'
       VpcId: !Ref Vpc
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
           CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
         - IpProtocol: -1

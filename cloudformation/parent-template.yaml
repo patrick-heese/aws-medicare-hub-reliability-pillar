@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: MediCare Hub - Parent stack orchestrating nested phases via TemplateURLs
+Description: Medicare Hub - Parent stack orchestrating nested phases via TemplateURLs
 
 Parameters:
   Phase1TemplateUrl:
@@ -25,14 +25,12 @@ Parameters:
     Type: String
     Default: admin
 
-  DbPassword:
+  DbPasswordParameterName:
     Type: String
-    NoEcho: true
+    Default: /medicarehub/db/master_password
+    Description: Name of SSM SecureString parameter that stores the RDS master password
 
   WebsiteContentBucketName:
-    Type: String
-
-  FailoverBucketName:
     Type: String
 
   DomainName:
@@ -42,13 +40,16 @@ Resources:
   # Phase 1 - Network (uses its own defaults; no params needed)
   Phase1Network:
     Type: AWS::CloudFormation::Stack
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       TemplateURL: !Ref Phase1TemplateUrl
 
   # Phase 2 - EFS (needs VPC + private subnets + app SG from Phase 1)
   Phase2EFS:
     Type: AWS::CloudFormation::Stack
-    DependsOn: Phase1Network
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       TemplateURL: !Ref Phase2TemplateUrl
       Parameters:
@@ -60,7 +61,8 @@ Resources:
   # Phase 3 - RDS (needs same VPC/subnets/SG; creds from parent)
   Phase3RDS:
     Type: AWS::CloudFormation::Stack
-    DependsOn: Phase1Network
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       TemplateURL: !Ref Phase3TemplateUrl
       Parameters:
@@ -69,14 +71,13 @@ Resources:
         PrivateSubnetBId: !GetAtt Phase1Network.Outputs.PrivateSubnetBId
         AppSecurityGroupId: !GetAtt Phase1Network.Outputs.AppSecurityGroupId
         DbUsername: !Ref DbUsername
-        DbPassword: !Ref DbPassword
+        DbPasswordParameterName: !Ref DbPasswordParameterName
 
   # Phase 4 - Compute (needs subnets/SGs + EFS FS ID + RDS endpoint + creds)
   Phase4Compute:
     Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - Phase2EFS
-      - Phase3RDS
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       TemplateURL: !Ref Phase4TemplateUrl
       Parameters:
@@ -92,20 +93,19 @@ Resources:
         EfsFileSystemId: !GetAtt Phase2EFS.Outputs.FileSystemId
         RdsEndpointAddress: !GetAtt Phase3RDS.Outputs.DBEndpointAddress
         DbUsername: !Ref DbUsername
-        DbPassword: !Ref DbPassword
+        DbPasswordParameterName: !Ref DbPasswordParameterName
 
   # Phase 5 - DNS/Failover (needs ALB + backup S3 website domain)
   Phase5DNS:
     Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - Phase4Compute
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       TemplateURL: !Ref Phase5TemplateUrl
       Parameters:
         DomainName: !Ref DomainName
         AlbDNSName: !GetAtt Phase4Compute.Outputs.AlbDNSName
         AlbHostedZoneId: !GetAtt Phase4Compute.Outputs.AlbHostedZoneId
-        FailoverBucketName: !Ref FailoverBucketName
         # S3WebsiteHostedZoneId can be omitted (Phase 5 has a default for us-east-1)
         # HealthCheckPath uses child default "/"
 

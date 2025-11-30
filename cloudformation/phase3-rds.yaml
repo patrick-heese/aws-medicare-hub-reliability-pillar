@@ -22,9 +22,10 @@ Parameters:
     Type: String
     Default: admin
 
-  DbPassword:
+  DbPasswordParameterName:
     Type: String
-    NoEcho: true
+    Default: /medicarehub/db/master_password
+    Description: Name of SSM SecureString parameter that stores the RDS master password
 
   DbName:
     Type: String
@@ -59,23 +60,26 @@ Resources:
 
   DBInstance:
     Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       DBInstanceIdentifier: medical-db
       AllocatedStorage: 20
       MaxAllocatedStorage: 25
       Engine: mysql
-      EngineVersion: '8.0'
+      EngineVersion: 8.0.43
       DBInstanceClass: db.t3.micro
       MultiAZ: true
       MasterUsername: !Ref DbUsername
-      MasterUserPassword: !Ref DbPassword
+      MasterUserPassword: !Sub "{{resolve:ssm-secure:${DbPasswordParameterName}:1}}"
       DBName: !Ref DbName
-      StorageType: gp2
+      StorageType: gp3
       PubliclyAccessible: false
       VPCSecurityGroups:
         - !Ref RdsSecurityGroup
       DBSubnetGroupName: !Ref DBSubnetGroup
       DeletionProtection: false
+      BackupRetentionPeriod: 7
 
 Outputs:
   DBEndpointAddress:

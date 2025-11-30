@@ -14,12 +14,6 @@ Parameters:
     Type: String
     Description: Hosted zone ID of the ALB (from Phase 4 output)
 
-  # Kept for compatibility with parent; the bucket must be named exactly DomainName,
-  # but the alias target is the regional S3 *website endpoint* (no bucket prefix).
-  FailoverBucketName:
-    Type: String
-    Description: Name of the S3 static website bucket (should equal DomainName)
-
   # us-east-1 S3 Website Hosted Zone ID (override if you deploy in another region)
   S3WebsiteHostedZoneId:
     Type: String

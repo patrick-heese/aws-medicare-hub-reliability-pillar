@@ -38,6 +38,8 @@ Resources:
 
   FileSystem:
     Type: AWS::EFS::FileSystem
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       Encrypted: false
       PerformanceMode: generalPurpose
